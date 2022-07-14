@@ -716,7 +716,12 @@ kube-system       Active   45h  # 所有由Kubernetes系统创建的资源都处
 
 ### 4.1.1 查看
 
-```
+1. 查看所有的ns  命令：`kubectl get ns`
+2. 查看指定的ns   命令：`kubectl get ns ns名称`
+3. 指定输出格式  命令：`kubectl get ns ns名称  -o 格式参数`
+4. 查看ns详情  命令：`kubectl describe ns ns名称`
+
+```c
 # 1 查看所有的ns  命令：kubectl get ns
 [root@master ~]# kubectl get ns
 NAME              STATUS   AGE
@@ -762,7 +767,7 @@ No LimitRange resource.
 
 ### 4.1.2 创建
 
-```
+```c
 # 创建namespace
 [root@master ~]# kubectl create ns dev
 namespace/dev created
@@ -770,7 +775,7 @@ namespace/dev created
 
 ### 4.1.3 删除
 
-```
+```c
 # 删除namespace
 [root@master ~]# kubectl delete ns dev
 namespace "dev" deleted
@@ -780,12 +785,14 @@ namespace "dev" deleted
 
 首先准备一个yaml文件：ns-dev.yaml
 
-```
+```c
 apiVersion: v1
 kind: Namespace
 metadata:
   name: dev
 ```
+
+> 除了`metadata.name`要自己配置以外，其他的基本不用自己改
 
 然后就可以执行对应的创建和删除命令了：
 
