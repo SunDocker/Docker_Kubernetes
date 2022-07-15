@@ -351,21 +351,170 @@ EOF
 
 ### 2.2.4 安装docker
 
+```c
+# 1、切换镜像源
+[root@master ~]# wget https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo -O /etc/yum.repos.d/docker-ce.repo
 
+# 2、查看当前镜像源中支持的docker版本
+[root@master ~]# yum list docker-ce --showduplicates
+
+# 3、安装特定版本的docker-ce
+# 必须制定--setopt=obsoletes=0，否则yum会自动安装更高版本
+[root@master ~]# yum install --setopt=obsoletes=0 docker-ce-18.06.3.ce-3.el7 -y
+
+# 4、添加一个配置文件
+#Docker 在默认情况下使用Vgroup Driver为cgroupfs，而Kubernetes推荐使用systemd来替代cgroupfs
+[root@master ~]# mkdir /etc/docker
+[root@master ~]# cat <<EOF> /etc/docker/daemon.json
+{
+	"exec-opts": ["native.cgroupdriver=systemd"],
+	"registry-mirrors": ["https://kn0t2bca.mirror.aliyuncs.com"]
+}
+EOF
+
+# 5、启动dokcer并查看其版本
+[root@master ~]# systemctl start docker
+[root@master ~]# docker version
+# 6、设置为开机自启
+[root@master ~]# systemctl enable docker
+```
 
 ### 2.2.5 安装kubernetes组件
 
+```c
+# 1、由于kubernetes的镜像在国外，速度比较慢，这里切换成国内的镜像源
+# 2、编辑/etc/yum.repos.d/kubernetes.repo,添加下面的配置
+[kubernetes]
+name=Kubernetes
+baseurl=http://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgchech=0
+repo_gpgcheck=0
+gpgkey=http://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg
+			http://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
 
+# 3、安装kubeadm、kubelet和kubectl
+[root@master ~]# yum install --setopt=obsoletes=0 kubeadm-1.17.4-0 kubelet-1.17.4-0 kubectl-1.17.4-0 -y
+
+# 4、配置kubelet的cgroup
+#编辑/etc/sysconfig/kubelet, 添加下面的配置
+KUBELET_CGROUP_ARGS="--cgroup-driver=systemd"
+KUBE_PROXY_MODE="ipvs"
+
+# 5、设置kubelet开机自启
+[root@master ~]# systemctl enable kubelet
+```
 
 ### 2.2.6 准备集群镜像
 
+> 所谓安装集群，其实就是安装那些组件
 
+```c
+# 在安装kubernetes集群之前，必须要提前准备好集群需要的镜像，所需镜像可以通过下面命令查看
+[root@master ~]# kubeadm config images list
+
+# 下载镜像
+# 此镜像kubernetes的仓库中，由于网络原因，无法连接，下面提供了一种替换方案
+images=(
+	kube-apiserver:v1.17.4
+	kube-controller-manager:v1.17.4
+	kube-scheduler:v1.17.4
+	kube-proxy:v1.17.4
+	pause:3.1
+	etcd:3.4.3-0
+	coredns:1.6.5
+)
+
+for imageName in ${images[@]};do
+	docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName
+	docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName k8s.gcr.io/$imageName
+	docker rmi registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName 
+done
+```
+
+> 可以使用`docker images`查看一下
 
 ### 2.2.7 集群初始化
 
+> 下面的操作只需要在master节点上执行即可
 
+```c
+# 创建集群
+[root@master ~]# kubeadm init \
+    --kubernetes-version=v1.17.4 \
+    --pod-network-cidr=10.244.0.0/16 \
+    --service-cidr=10.96.0.0/12 \
+	--apiserver-advertise-address=192.168.61.100 \
+# 创建必要文件
+[root@master ~]# mkdir -p $HOME/.kube
+[root@master ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@master ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+
+> 下面的操作只需要在 node (节点) 节点上执行即可
+
+```
+kubeadm join 192.168.61.100:6443 --token m17h7c.wgts4vfjyibx52fu \
+    --discovery-token-ca-cert-hash sha256:6aad006aacda0e4f81ff9aaa87585ab0d544f76a761dfbb3d1af4d65fb619689 
+```
+
+> 注意，这个是复制创建集群后显示的提示信息的
+
+在master上查看节点信息
+
+```c
+[root@master ~]# kubectl get nodes
+NAME    STATUS   ROLES     AGE   VERSION
+master  NotReady  master   6m    v1.17.4
+node1   NotReady   <none>  22s   v1.17.4
+node2   NotReady   <none>  19s   v1.17.4
+```
 
 ### 2.2.8 安装网络插件
+
+kubernetes支持多种网络插件，比如flannel、calico、canal等等，任选一种使用即可，本次选择flannel
+
+> 下面的操作依旧只在`master`节点执行即可，插件使用的是DaemonSet的控制器，它会在每个节点上都运行
+
+```c
+# 获取flannel的配置文件
+[root@master ~]# wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+# 修改文件中quay.io仓库为quay-mirror.qiniu.com
+
+# 使用配置文件启动flannel
+    [root@master ~] kubectl apply -f kube-flannel.yaml
+    
+# 稍等片刻，再次查看集群节点的状态
+[root@master ~]# kubectl get nodes
+NAME     STATUS   ROLES    AGE   VERSION
+master   Ready    master   26m   v1.17.4
+node1    Ready    <none>   23m   v1.17.4
+node2    Ready    <none>   23m   v1.17.4
+```
+
+## 2.3 服务部署
+
+接下来在kubernetes集群中部署一个nginx程序，测试下集群是否在正常工作
+
+```c
+# 部署nginx
+[root @master ~]# kubectl create deployment nginx --image=nginx:1.14-alpine
+
+# 暴露端口
+[root @master ~]# kubectl expose deploy nginx  --port=80 --type=NodePort
+    
+# 查看服务状态
+[root@master ~]# kubectl get pod,svc
+NAME                         READY   STATUS    RESTARTS   AGE
+pod/nginx-6867cdf567-5pmb9   1/1     Running   0          42s
+
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+service/kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP        27m
+service/nginx        NodePort    10.102.64.174   <none>        80:31821/TCP   11s  
+```
+
+> 接下来可以用浏览器访问`192.168.61.100:31821`，可以看到nginx的页面
 
 # 3 资源管理
 
@@ -457,6 +606,36 @@ address:
 # 形式二(了解):
 address: [顺义,昌平]
 ```
+
+> 数组语法`-`的理解：`-`后面可以是一个值，那就代表数组中的一个普通元素，当然也可以是一个新的`yaml`“对象”，比如下面这种：
+>
+> ```yaml
+> containers:
+>   - image: nginx:latest
+>     name: pod
+>     ports:
+>     - name: nginx-port
+>       containerPort: 80
+>       protocol: TCP
+> ```
+>
+> 转换成json是：
+>
+> ```json
+> "containers": [
+>       {
+>         "image": "nginx:latest",
+>         "name": "pod",
+>         "ports": [
+>           {
+>             "name": "nginx-port",
+>             "containerPort": 80,
+>             "protocol": "TCP"
+>           }
+>         ]
+>       }
+>     ]
+> ```
 
 > 小提示：
 >
@@ -949,9 +1128,11 @@ Pod可以认为是**容器的封装**，一个Pod中可以存在一个或者多�
 
 ![image-20200407121501907](Kubernetes.assets/image-20200407121501907.png)
 
+> 容器大概分为两类，最下面的属于**根容器**，上面的两个属于**用户容器**
+
 kubernetes在集群启动之后，集群中的各个**组件**也都是以**Pod**方式运行的。可以通过下面命令查看：
 
-```
+```c
 [root@master ~]# kubectl get pod -n kube-system
 NAMESPACE     NAME                             READY   STATUS    RESTARTS   AGE
 kube-system   coredns-6955765f44-68g6v         1/1     Running   0          2d1h
@@ -966,11 +1147,27 @@ kube-system   kube-proxy-87spt                 1/1     Running   0          2d1h
 kube-system   kube-scheduler-master            1/1     Running   0          2d1h
 ```
 
+> master节点上的四个组件：
+>
+> - kube-apiserver-master 
+> - kube-scheduler-master
+> - kube-controller-manager-master
+> - etcd-master
+>
+> dns相关：
+>
+> - coredns
+>
+> 网络与代理（每个节点上都有一个）
+>
+> - kube-flannel
+> - kube-proxy
+
 ### 4.2.1 创建并运行
 
-kubernetes没有提供单独运行Pod的命令，都是通过Pod控制器来实现的
+kubernetes没有提供单独运行Pod的命令，都是通过**Pod控制器**来实现的
 
-```
+```c
 # 命令格式： kubectl run (pod控制器名称) [参数] 
 # --image  指定Pod的镜像
 # --port   指定端口
@@ -981,14 +1178,14 @@ deployment.apps/nginx created
 
 ### 4.2.2 查看pod信息
 
-```
+```c
 # 查看Pod基本信息
 [root@master ~]# kubectl get pods -n dev
 NAME    READY   STATUS    RESTARTS   AGE
 nginx   1/1     Running   0          43s
 
 # 查看Pod的详细信息
-[root@master ~]# kubectl describe pod nginx -n dev
+[root@master ~]# kubectl describe pod nginx_name -n dev
 Name:         nginx
 Namespace:    dev
 Priority:     0
@@ -1041,13 +1238,17 @@ Events:
   Normal  Started    3m36s      kubelet, node1     Started container nginx
 ```
 
+> `Events`这部分较为常用，可用来**排错**
+
 ### 4.2.3 访问Pod
 
-```
-# 获取podIP
+要访问需要先得到其IP地址，这个IP地址会随着pod的更新而变化，是不稳定的
+
+```c
+# 查看pod更多信息/获取podIP
 [root@master ~]# kubectl get pods -n dev -o wide
-NAME    READY   STATUS    RESTARTS   AGE    IP             NODE    ... 
-nginx   1/1     Running   0          190s   10.244.1.23   node1   ...
+NAME        READY   STATUS    RESTARTS   AGE    IP             NODE    ... 
+nginx_name   1/1     Running   0          190s   10.244.1.23   node1   ...
 
 #访问POD
 [root@master ~]# curl http://10.244.1.23:80
@@ -1062,11 +1263,21 @@ nginx   1/1     Running   0          190s   10.244.1.23   node1   ...
 </html>
 ```
 
+> READY：pod中有几个容器，有几个正在运行
+>
+> > 根容器不会计算在内
+>
+> RESTARTS：重启次数
+>
+> > 遇见问题时会自动重启
+>
+> NODE：被调度到哪个节点上运行
+
 ### 4.2.4 删除指定Pod
 
-```
+```c
 # 删除指定Pod
-[root@master ~]# kubectl delete pod nginx -n dev
+[root@master ~]# kubectl delete pod nginx_name -n dev
 pod "nginx" deleted
 
 # 此时，显示删除Pod成功，但是再查询，发现又新产生了一个 
@@ -1074,16 +1285,16 @@ pod "nginx" deleted
 NAME    READY   STATUS    RESTARTS   AGE
 nginx   1/1     Running   0          21s
 
-# 这是因为当前Pod是由Pod控制器创建的，控制器会监控Pod状况，一旦发现Pod死亡，会立即重建
+# 这是因为当前Pod是由Pod控制器创建的(kubectl run)，控制器会监控Pod状况，一旦发现Pod死亡，会立即重建
 # 此时要想删除Pod，必须删除Pod控制器
 
 # 先来查询一下当前namespace下的Pod控制器
-[root@master ~]# kubectl get deploy -n  dev
+[root@master ~]# kubectl get deployment -n  dev
 NAME    READY   UP-TO-DATE   AVAILABLE   AGE
 nginx   1/1     1            1           9m7s
 
 # 接下来，删除此PodPod控制器
-[root@master ~]# kubectl delete deploy nginx -n dev
+[root@master ~]# kubectl delete deployment nginx -n dev
 deployment.apps "nginx" deleted
 
 # 稍等片刻，再查询Pod，发现Pod被删除了
@@ -1095,7 +1306,9 @@ No resources found in dev namespace.
 
 创建一个pod-nginx.yaml，内容如下：
 
-```
+> 这里启动的就是一个单独的pod，而不是pod控制器，所以下面这个`name: nginx`其实是pod的名称
+
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1111,11 +1324,106 @@ spec:
       protocol: TCP
 ```
 
-然后就可以执行对应的创建和删除命令了：
+然后就可以执行对应的**创建**和**删除**命令了：
 
 创建：kubectl create -f pod-nginx.yaml
 
 删除：kubectl delete -f pod-nginx.yaml
+
+## 4.3 Label
+
+Label是kubernetes系统中的一个重要概念。它的作用就是在资源上添加标识，用来对它们进行区分和选择。
+
+Label的特点：
+
+- 一个Label会以key/value键值对的形式附加到各种对象上，如Node、Pod、Service等等
+- 一个资源对象可以定义任意数量的Label ，同一个Label也可以被添加到任意数量的资源对象上去
+- Label通常在资源对象定义时确定，当然也可以在对象创建后动态添加或者删除
+
+可以通过Label实现资源的多维度分组，以便灵活、方便地进行资源分配、调度、配置、部署等管理工作。
+
+> 一些常用的Label 示例如下：
+>
+> - 版本标签："version":"release", "version":"stable"......
+> - 环境标签："environment":"dev"，"environment":"test"，"environment":"pro"
+> - 架构标签："tier":"frontend"，"tier":"backend"
+
+标签定义完毕之后，还要考虑到标签的选择，这就要使用到Label Selector，即：
+
+Label用于给某个资源对象定义标识
+
+Label Selector用于查询和筛选拥有某些标签的资源对象
+
+当前有两种Label Selector：
+
+- 基于等式的Label Selector
+
+  name = slave: 选择所有包含Label中key="name"且value="slave"的对象
+
+  env != production: 选择所有包括Label中的key="env"且value不等于"production"的对象
+
+- 基于集合的Label Selector
+
+  name in (master, slave): 选择所有包含Label中的key="name"且value="master"或"slave"的对象
+
+  name not in (frontend): 选择所有包含Label中的key="name"且value不等于"frontend"的对象
+
+标签的选择条件可以使用多个，此时将多个Label Selector进行组合，使用逗号","进行分隔即可。例如：
+
+name=slave，env!=production
+
+name not in (frontend)，env!=production
+
+### 4.3.1 命令方式
+
+```c
+# 为pod资源打标签
+[root@master ~]# kubectl label pod nginx-pod version=1.0 -n dev
+pod/nginx-pod labeled
+
+# 为pod资源更新标签
+[root@master ~]# kubectl label pod nginx-pod version=2.0 -n dev --overwrite
+pod/nginx-pod labeled
+
+# 查看标签
+[root@master ~]# kubectl get pod nginx-pod  -n dev --show-labels
+NAME        READY   STATUS    RESTARTS   AGE   LABELS
+nginx-pod   1/1     Running   0          10m   version=2.0
+
+# 筛选标签
+[root@master ~]# kubectl get pod -n dev -l version=2.0  --show-labels
+NAME        READY   STATUS    RESTARTS   AGE   LABELS
+nginx-pod   1/1     Running   0          17m   version=2.0
+[root@master ~]# kubectl get pod -n dev -l version!=2.0 --show-labels
+No resources found in dev namespace.
+
+#删除标签
+[root@master ~]# kubectl label pod nginx-pod version- -n dev
+pod/nginx-pod labeled
+```
+
+### 4.3.2 配置方式
+
+```c
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: dev
+  labels:
+    version: "3.0" 
+    env: "test"
+spec:
+  containers:
+  - image: nginx:latest
+    name: pod
+    ports:
+    - name: nginx-port
+      containerPort: 80
+      protocol: TCP
+```
+
+然后就可以执行对应的更新命令了：kubectl apply -f pod-nginx.yaml
 
 # 5 Pod详解
 
