@@ -145,9 +145,9 @@ kubernetes的本质是**一组服务器集群**，它可以在集群的每个**�
 
 **Master**：集群控制节点，每个集群需要**至少一个master节点**负责集群的管控
 
-**Node (节点)** ：工作负载节点，由master分配容器到这些node工作节点上，然后node节点上的docker负责容器的运行
+**Node** ：工作负载节点，由master分配容器到这些node工作节点上，然后node节点上的docker负责容器的运行
 
-**Pod (吊舱)** ：kubernetes的**最小控制单元**，容器都是运行在pod中的，一个pod中可以有1个或者多个容器
+**Pod**：kubernetes的**最小控制单元**，容器都是运行在pod中的，一个pod中可以有1个或者多个容器
 
 **Controller**：控制器，通过它来实现**对pod的管理**，比如启动pod、停止pod、伸缩pod的数量等等
 
@@ -1332,15 +1332,23 @@ spec:
 
 ## 4.3 Label
 
-Label是kubernetes系统中的一个重要概念。它的作用就是在资源上添加标识，用来对它们进行区分和选择。
+***Label***是kubernetes系统中的一个重要概念。它的作用就是在资源上添加**标识**，用来对它们进行区分和选择。
+
+> 比如有两组网站程序，一组负责前台，另一组负责后台；
+>
+> 看起来namespace也可以实现分组功能，但不同的namespace之间无法直接**通信**
 
 Label的特点：
 
-- 一个Label会以key/value键值对的形式附加到各种对象上，如Node、Pod、Service等等
-- 一个资源对象可以定义任意数量的Label ，同一个Label也可以被添加到任意数量的资源对象上去
-- Label通常在资源对象定义时确定，当然也可以在对象创建后动态添加或者删除
+- 一个Label会以key/value**键值对**的形式附加到各种对象上，如Node、Pod、Service等等
 
-可以通过Label实现资源的多维度分组，以便灵活、方便地进行资源分配、调度、配置、部署等管理工作。
+  > 意思就是Label是一对值，其实“键值”的概念没那么强
+
+- 一个资源对象可以定义**任意数量**的Label ，同一个Label也可以被添加到任意数量的资源对象上去
+
+- Label通常在**资源对象定义时**确定，当然也可以在**对象创建后**动态添加或者删除
+
+可以通过Label实现资源的**多维度分组**，以便灵活、方便地进行资源分配、调度、配置、部署等管理工作。
 
 > 一些常用的Label 示例如下：
 >
@@ -1348,27 +1356,27 @@ Label的特点：
 > - 环境标签："environment":"dev"，"environment":"test"，"environment":"pro"
 > - 架构标签："tier":"frontend"，"tier":"backend"
 
-标签定义完毕之后，还要考虑到标签的选择，这就要使用到Label Selector，即：
+标签定义完毕之后，还要考虑到**<u>标签的选择</u>**，这就要使用到`Label Selector`，即：
 
-Label用于给某个资源对象定义标识
+- Label用于给某个资源对象**定义标识**
 
-Label Selector用于查询和筛选拥有某些标签的资源对象
+- Label Selector用于**查询和筛选**拥有某些标签的资源对象
 
 当前有两种Label Selector：
 
 - 基于等式的Label Selector
 
-  name = slave: 选择所有包含Label中key="name"且value="slave"的对象
+  `name = slave`: 选择所有包含Label中key="name"且value="slave"的对象
 
-  env != production: 选择所有包括Label中的key="env"且value不等于"production"的对象
+  `env != production`: 选择所有包括Label中的key="env"且value不等于"production"的对象
 
 - 基于集合的Label Selector
 
-  name in (master, slave): 选择所有包含Label中的key="name"且value="master"或"slave"的对象
+  `name in (master, slave)`: 选择所有包含Label中的key="name"且value="master"或"slave"的对象
 
-  name not in (frontend): 选择所有包含Label中的key="name"且value不等于"frontend"的对象
+  `name not in (frontend)`: 选择所有包含Label中的key="name"且value不等于"frontend"的对象
 
-标签的选择条件可以使用多个，此时将多个Label Selector进行组合，使用逗号","进行分隔即可。例如：
+**标签的选择条件**可以使用**多个**，此时将多个Label Selector进行组合，使用逗号"`,`"进行分隔即可。例如：
 
 name=slave，env!=production
 
@@ -1377,16 +1385,21 @@ name not in (frontend)，env!=production
 ### 4.3.1 命令方式
 
 ```c
+# 查看标签（省略了[name]，应该是查看命名空间下所有pod）
+[root@master ~]# kubectl get pod -n dev --show-labels
+NAME    READY   STATUS    RESTARTS   AGE   LABELS
+nginx   1/1     Running   0          23s   <none>
+
 # 为pod资源打标签
-[root@master ~]# kubectl label pod nginx-pod version=1.0 -n dev
+[root@master ~]# kubectl label pod nginx version=1.0 -n dev
 pod/nginx-pod labeled
 
 # 为pod资源更新标签
-[root@master ~]# kubectl label pod nginx-pod version=2.0 -n dev --overwrite
+[root@master ~]# kubectl label pod nginx version=2.0 -n dev --overwrite
 pod/nginx-pod labeled
 
 # 查看标签
-[root@master ~]# kubectl get pod nginx-pod  -n dev --show-labels
+[root@master ~]# kubectl get pod nginx -n dev --show-labels
 NAME        READY   STATUS    RESTARTS   AGE   LABELS
 nginx-pod   1/1     Running   0          10m   version=2.0
 
@@ -1398,13 +1411,21 @@ nginx-pod   1/1     Running   0          17m   version=2.0
 No resources found in dev namespace.
 
 #删除标签
-[root@master ~]# kubectl label pod nginx-pod version- -n dev
+[root@master ~]# kubectl label pod nginx version- -n dev
 pod/nginx-pod labeled
 ```
 
+> 注意：
+>
+> - 查看标签是通过`get pod`的额外参数`--show-labels`完成的，筛选也是，额外参数为`-l labelselector`
+> - 打标签、更新标签和删除标签的命令必须有`[name]`参数
+> - 一个pod只能创建`key`互不相同的一个或多个标签，但允许更新标签值，指定额外参数`--overwrite`即可
+
 ### 4.3.2 配置方式
 
-```c
+在`metadata`中指定`labels`属性即可
+
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1423,7 +1444,246 @@ spec:
       protocol: TCP
 ```
 
-然后就可以执行对应的更新命令了：kubectl apply -f pod-nginx.yaml
+然后就可以执行对应的更新命令了：`kubectl apply -f pod-nginx.yaml`
+
+## 4.4 Deployment
+
+在kubernetes中，**Pod是最小的控制单元**，但是kubernetes很少直接控制Pod，一般都是通过**Pod控制器来**完成的。Pod控制器用于pod的管理，**确保pod资源符合预期的状态**，当pod的资源出现故障时，会尝试进行**重启或重建pod**。
+
+> 什么是“确保pod资源符合预期的状态”，比如最开始的时候让pod控制器创建了三个资源，中途有一个资源因为某种原因崩溃了，那pod控制器就必须重启或再创建一个
+
+在kubernetes中Pod控制器的**种类**有很多，本章节只介绍**一种**：***Deployment***。
+
+![image-20200408193950807](Kubernetes.assets/image-20200408193950807.png)
+
+> pod控制器与pod之间是依靠Label建立联系的
+
+### 4.4.1 命令操作
+
+```c
+# 命令格式: kubectl create deployment 名称  [参数] 
+# --image  指定pod的镜像
+# --port   指定端口
+# --replicas  指定创建pod数量
+# --namespace  指定namespace
+[root@master ~]# kubectl run nginx --image=nginx:latest --port=80 --replicas=3 -n dev
+deployment.apps/nginx created
+
+# 查看创建的Pod
+[root@master ~]# kubectl get pods -n dev
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-5ff7956ff6-6k8cb   1/1     Running   0          19s
+nginx-5ff7956ff6-jxfjt   1/1     Running   0          19s
+nginx-5ff7956ff6-v6jqw   1/1     Running   0          19s
+
+# 查看deployment的信息
+[root@master ~]# kubectl get deploy -n dev
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   3/3     3            3           2m42s
+
+# UP-TO-DATE：成功升级的副本数量
+# AVAILABLE：可用副本的数量
+[root@master ~]# kubectl get deploy -n dev -o wide
+NAME    READY UP-TO-DATE  AVAILABLE   AGE     CONTAINERS   IMAGES              SELECTOR
+nginx   3/3     3         3           2m51s   nginx        nginx:latest        run=nginx
+
+# 查看deployment的详细信息
+[root@master ~]# kubectl describe deploy nginx -n dev
+Name:                   nginx
+Namespace:              dev
+CreationTimestamp:      Wed, 08 May 2021 11:14:14 +0800
+Labels:                 run=nginx
+Annotations:            deployment.kubernetes.io/revision: 1
+Selector:               run=nginx
+Replicas:               3 desired | 3 updated | 3 total | 3 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max 违规词汇
+Pod Template:
+  Labels:  run=nginx
+  Containers:
+   nginx:
+    Image:        nginx:latest
+    Port:         80/TCP
+    Host Port:    0/TCP
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   nginx-5ff7956ff6 (3/3 replicas created)
+Events:
+  Type    Reason             Age    From                   Message
+  ----    ------             ----   ----                   -------
+  Normal  ScalingReplicaSet  5m43s  deployment-controller  Scaled up replicaset nginx-5ff7956ff6 to 3
+  
+# 删除 
+[root@master ~]# kubectl delete deploy nginx -n dev
+deployment.apps "nginx" deleted
+```
+
+> 注：
+>
+> - 新版本的k8s需要用`kubectl create deployment xxx`创建deployment
+>
+> - pod控制器与pod之间是依靠Label建立联系的
+>
+>   ```c
+>   [root@master ~]# kubectl get pod -n dev --show-labels
+>   NAME                     READY   STATUS    RESTARTS   AGE    LABELS
+>   nginx-64777cd554-62x2h   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   nginx-64777cd554-dptvv   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   nginx-64777cd554-x45qw   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   ```
+>
+> - 删除pod控制器之后，pod也会被销毁
+
+### 4.4.2 配置操作
+
+创建一个deploy-nginx.yaml，内容如下：
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: dev
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      run: nginx
+  template:
+    metadata:
+      labels:
+        run: nginx
+    spec:
+      containers:
+      - image: nginx:latest
+        name: nginx
+        ports:
+        - containerPort: 80
+          protocol: TCP
+```
+
+> 注意`template`那一部分，正好是pod的配置形式，这称为`pod模板`；
+>
+> pod控制器和pod通过`matchLabels`和`labels`建立联系
+
+然后就可以执行对应的创建和删除命令了：
+
+创建：`kubectl create -f deploy-nginx.yaml`
+
+删除：`kubectl delete -f deploy-nginx.yaml`
+
+## 4.5 Service
+
+通过上节课的学习，已经能够利用Deployment来创建一组Pod来提供具有高可用性的服务。
+
+虽然每个Pod都会分配一个**单独的Pod IP**，然而却存在如下两问题：
+
+- Pod IP 会随着 **Pod 的重建**产生变化
+- Pod IP 仅仅是**集群内可见的虚拟IP**，**外部无法访问**
+
+这样对于访问这个服务带来了难度。因此，kubernetes设计了***Service***来解决这个问题。
+
+***Service***可以看作是一组同类Pod**对外的访问接口**。借助Service，应用可以方便地实现**<u>服务发现和负载均衡</u>**。
+
+![image-20200408194716912](Kubernetes.assets/image-20200408194716912.png)
+
+### 4.5.1 创建集群内部可访问的Service
+
+```c
+# 暴露Service
+[root@master ~]# kubectl expose deploy nginx --name=svc-nginx1 --type=ClusterIP --port=80 --target-port=80 -n dev
+service/svc-nginx1 exposed
+
+# 查看service
+[root@master ~]# kubectl get svc svc-nginx1 -n dev -o wide
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE     SELECTOR
+svc-nginx1   ClusterIP   10.109.179.231   <none>        80/TCP    3m51s   run=nginx
+
+# 这里产生了一个CLUSTER-IP，这就是service的IP，在Service的生命周期中，这个地址是不会变动的
+# 可以通过这个IP访问当前service对应的POD
+[root@master ~]# curl 10.109.179.231:80
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+.......
+</body>
+</html>
+```
+
+> 注意：
+>
+> - 暴露pod时需要通过deployment，而不是直接指定pod
+> - `ClusterIP`依然是集群内部的IP，外部无法访问
+
+### 4.5.2 创建集群外部也可访问的Service
+
+```c
+# 上面创建的Service的type类型为ClusterIP，这个ip地址只用集群内部可访问
+# 如果需要创建外部也可以访问的Service，需要修改type为NodePort
+[root@master ~]# kubectl expose deploy nginx --name=svc-nginx2 --type=NodePort --port=80 --target-port=80 -n dev
+service/svc-nginx2 exposed
+
+# 此时查看，会发现出现了NodePort类型的Service，而且有一对Port（80:31928/TC）
+[root@master ~]# kubectl get svc  svc-nginx2  -n dev -o wide
+NAME          TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE    SELECTOR
+svc-nginx2    NodePort    10.100.94.0      <none>        80:31928/TCP   9s     run=nginx
+
+# 接下来就可以通过集群外的主机访问 节点IP:31928访问服务了
+# 例如在的电脑主机上通过浏览器访问下面的地址
+http://192.168.61.100:31928/
+```
+
+### 4.5.3 删除Service
+
+```c
+[root@master ~]# kubectl delete svc svc-nginx-1 -n dev 
+service "svc-nginx-1" deleted
+```
+
+### 4.5.4 配置方式
+
+创建一个svc-nginx.yaml，内容如下：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nginx
+  namespace: dev
+spec:
+  clusterIP: 10.109.179.231 #固定svc的内网ip
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    run: nginx
+  type: ClusterIP
+```
+
+> 如果`spec.clusterIP`指定了，就用指定的ip，不然就随机分配
+
+然后就可以执行对应的创建和删除命令了：
+
+创建：kubectl create -f svc-nginx.yaml
+
+删除：kubectl delete -f svc-nginx.yaml
+
+> **小结**
+>
+> 至此，已经掌握了Namespace、Pod、Deployment、Service资源的基本操作，有了这些操作，就可以在kubernetes集群中实现一个服务的简单部署和访问了，但是如果想要更好的使用kubernetes，就需要深入学习这几种资源的细节和原理。
 
 # 5 Pod详解
 
