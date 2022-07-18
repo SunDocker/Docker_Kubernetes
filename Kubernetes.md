@@ -145,9 +145,9 @@ kubernetes的本质是**一组服务器集群**，它可以在集群的每个**�
 
 **Master**：集群控制节点，每个集群需要**至少一个master节点**负责集群的管控
 
-**Node (节点)** ：工作负载节点，由master分配容器到这些node工作节点上，然后node节点上的docker负责容器的运行
+**Node** ：工作负载节点，由master分配容器到这些node工作节点上，然后node节点上的docker负责容器的运行
 
-**Pod (吊舱)** ：kubernetes的**最小控制单元**，容器都是运行在pod中的，一个pod中可以有1个或者多个容器
+**Pod**：kubernetes的**最小控制单元**，容器都是运行在pod中的，一个pod中可以有1个或者多个容器
 
 **Controller**：控制器，通过它来实现**对pod的管理**，比如启动pod、停止pod、伸缩pod的数量等等
 
@@ -190,11 +190,11 @@ kubernetes有多种部署方式，目前主流的方式有kubeadm、minikube、�
 
 ### 2.1.3 主机规划
 
-| 作用   | IP地址          | 操作系统               | 配置                    |
-| ------ | --------------- | ---------------------- | ----------------------- |
-| Master | 192.168.109.100 | CentOS7 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
-| Node1  | 192.168.109.101 | CentOS7 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
-| Node2  | 192.168.109.102 | CentOS7 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
+| 作用   | IP地址         | 操作系统                 | 配置                    |
+| ------ | -------------- | ------------------------ | ----------------------- |
+| Master | 192.168.61.100 | CentOS7.9 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
+| Node1  | 192.168.61.101 | CentOS7.9 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
+| Node2  | 192.168.61.102 | CentOS7.9 基础设施服务器 | 2核CPU，2G内存，50G硬盘 |
 
 ## 2.2 环境搭建
 
@@ -202,29 +202,319 @@ kubernetes有多种部署方式，目前主流的方式有kubeadm、minikube、�
 
 ### 2.2.1 主机安装
 
+安装虚拟机过程中注意下面选项的设置：
 
+- 操作系统环境：CPU(2C)、内存(2G)、硬盘(50G)
+
+- 语言选择：中文简体
+
+- 软件选择：基础设施服务器
+
+- 分区选择：自动分区
+
+- 网络配置：按照下面配置网络地址信息
+
+  ```
+  网络地址：192.168.61.100(100、101、102)
+  子网掩码：255.255.255.0
+  默认网关：192.168.61.2
+  DNS：223.5.5.5
+  ```
+
+- 主机名设置
 
 ### 2.2.3 环境初始化
 
+1. 检查**操作系统的版本**
 
+```c
+# 此方式下安装kubernetes集群要求Centos版本要在7.5或之上
+[root@master ~]# cat /etc/redhat-release
+CentOS Linux release 7.9.2009 (Core)
+```
+
+2. **主机名解析**
+
+为了方便集群节点间的直接调用，在这个配置一下主机名解析
+
+> 这里只是学习、测试等环境的用法
+>
+> 企业中推荐使用内部DNS服务器
+
+```c
+# 主机名成解析 编辑三台服务器的/etc/hosts文件，添加下面内容
+192.168.61.100 master
+192.168.61.101 node1
+192.168.61.102 node2
+```
+
+3. **时间同步**
+
+kubernetes要求集群中的节点**时间必须精确一致**，这里使用`chronyd`服务从**网络**同步时间
+
+> 企业中建议配置内部的时间同步服务器
+
+```c
+# 启动chronyd服务
+[root@master ~]# systemctl start chronyd
+[root@master ~]# systemctl enable chronyd
+[root@master ~]# date
+```
+
+4. 禁用`iptable`和`firewalld`服务
+
+kubernetes和docker在运行的中会产生大量的*iptables规则*，为了不让系统规则跟它们混淆，直接关闭系统的规则
+
+> 在生产环境中还是要慎重关闭防火墙
+
+```c
+# 1 关闭firewalld服务
+[root@master ~]# systemctl stop firewalld
+[root@master ~]# systemctl disable firewalld
+# 2 关闭iptables服务
+[root@master ~]# systemctl stop iptables
+[root@master ~]# systemctl disable iptables
+```
+
+5. 禁用`selinux`
+
+selinux是linux系统下的一个**安全服务**，如果不关闭它，在安装集群中会产生各种各样的奇葩问题
+
+```c
+# 编辑 /etc/selinux/config 文件，修改SELINUX的值为disable
+# 注意修改完毕之后需要重启linux服务
+SELINUX=disabled
+```
+
+> 需要重启后生效
+
+6. 禁用`swap`分区
+
+swap分区指的是虚拟内存分区，它的作用是**物理内存**使用完，之后将**磁盘空间**虚拟成内存来使用，启用swap设备会对系统的**性能**产生非常负面的影响，因此kubernetes要求每个节点都要禁用swap设备，但是如果因为某些原因确实不能关闭swap分区，就需要在集群安装过程中通过明确的**参数进行配置**说明
+
+```c
+# 编辑分区配置文件/etc/fstab，注释掉swap分区一行
+# 注意修改完毕之后需要重启linux服务
+vim /etc/fstab
+注释掉 /dev/mapper/centos-swap swap
+# /dev/mapper/centos-swap swap
+```
+
+>需要重启后生效，可以通过`free -m`查看内存分配情况
+
+7. 修改linux的内核参数
+
+> 这也是kubernetes要求做的
+
+```c
+# 修改linux的内核采纳数，添加网桥过滤和地址转发功能
+# 编辑/etc/sysctl.d/kubernetes.conf文件，添加如下配置：
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+
+# 重新加载配置
+[root@master ~]# sysctl -p
+# 加载网桥过滤模块
+[root@master ~]# modprobe br_netfilter
+# 查看网桥过滤模块是否加载成功
+[root@master ~]# lsmod | grep br_netfilter
+```
+
+8. 配置ipvs功能
+
+在Kubernetes中**Service**有两种带来模型，一种是基于iptables的，一种是基于ipvs的
+
+两者比较的话，ipvs的性能明显要高一些，但是如果要使用它，需要手动载入ipvs模块
+
+```c
+# 1.安装ipset和ipvsadm
+[root@master ~]# yum install ipset ipvsadm -y
+# 2.添加需要加载的模块写入脚本文件
+[root@master ~]# cat <<EOF> /etc/sysconfig/modules/ipvs.modules
+#!/bin/bash
+modprobe -- ip_vs
+modprobe -- ip_vs_rr
+modprobe -- ip_vs_wrr
+modprobe -- ip_vs_sh
+modprobe -- nf_conntrack_ipv4
+EOF
+# 3.为脚本添加执行权限
+[root@master ~]# chmod +x /etc/sysconfig/modules/ipvs.modules
+# 4.执行脚本文件
+[root@master ~]# /bin/bash /etc/sysconfig/modules/ipvs.modules
+# 5.查看对应的模块是否加载成功
+[root@master ~]# lsmod | grep -e ip_vs -e nf_conntrack_ipv4
+```
+
+9. 重启服务器：reboot
 
 ### 2.2.4 安装docker
 
+```c
+# 1、切换镜像源
+[root@master ~]# wget https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo -O /etc/yum.repos.d/docker-ce.repo
 
+# 2、查看当前镜像源中支持的docker版本
+[root@master ~]# yum list docker-ce --showduplicates
+
+# 3、安装特定版本的docker-ce
+# 必须制定--setopt=obsoletes=0，否则yum会自动安装更高版本
+[root@master ~]# yum install --setopt=obsoletes=0 docker-ce-18.06.3.ce-3.el7 -y
+
+# 4、添加一个配置文件
+#Docker 在默认情况下使用Vgroup Driver为cgroupfs，而Kubernetes推荐使用systemd来替代cgroupfs
+[root@master ~]# mkdir /etc/docker
+[root@master ~]# cat <<EOF> /etc/docker/daemon.json
+{
+	"exec-opts": ["native.cgroupdriver=systemd"],
+	"registry-mirrors": ["https://kn0t2bca.mirror.aliyuncs.com"]
+}
+EOF
+
+# 5、启动dokcer并查看其版本
+[root@master ~]# systemctl start docker
+[root@master ~]# docker version
+# 6、设置为开机自启
+[root@master ~]# systemctl enable docker
+```
 
 ### 2.2.5 安装kubernetes组件
 
+```c
+# 1、由于kubernetes的镜像在国外，速度比较慢，这里切换成国内的镜像源
+# 2、编辑/etc/yum.repos.d/kubernetes.repo,添加下面的配置
+[kubernetes]
+name=Kubernetes
+baseurl=http://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgchech=0
+repo_gpgcheck=0
+gpgkey=http://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg
+			http://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
 
+# 3、安装kubeadm、kubelet和kubectl
+[root@master ~]# yum install --setopt=obsoletes=0 kubeadm-1.17.4-0 kubelet-1.17.4-0 kubectl-1.17.4-0 -y
+
+# 4、配置kubelet的cgroup
+#编辑/etc/sysconfig/kubelet, 添加下面的配置
+KUBELET_CGROUP_ARGS="--cgroup-driver=systemd"
+KUBE_PROXY_MODE="ipvs"
+
+# 5、设置kubelet开机自启
+[root@master ~]# systemctl enable kubelet
+```
 
 ### 2.2.6 准备集群镜像
 
+> 所谓安装集群，其实就是安装那些组件
 
+```c
+# 在安装kubernetes集群之前，必须要提前准备好集群需要的镜像，所需镜像可以通过下面命令查看
+[root@master ~]# kubeadm config images list
+
+# 下载镜像
+# 此镜像kubernetes的仓库中，由于网络原因，无法连接，下面提供了一种替换方案
+images=(
+	kube-apiserver:v1.17.4
+	kube-controller-manager:v1.17.4
+	kube-scheduler:v1.17.4
+	kube-proxy:v1.17.4
+	pause:3.1
+	etcd:3.4.3-0
+	coredns:1.6.5
+)
+
+for imageName in ${images[@]};do
+	docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName
+	docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName k8s.gcr.io/$imageName
+	docker rmi registry.cn-hangzhou.aliyuncs.com/google_containers/$imageName 
+done
+```
+
+> 可以使用`docker images`查看一下
 
 ### 2.2.7 集群初始化
 
+> 下面的操作只需要在master节点上执行即可
 
+```c
+# 创建集群
+[root@master ~]# kubeadm init \
+    --kubernetes-version=v1.17.4 \
+    --pod-network-cidr=10.244.0.0/16 \
+    --service-cidr=10.96.0.0/12 \
+	--apiserver-advertise-address=192.168.61.100 \
+# 创建必要文件
+[root@master ~]# mkdir -p $HOME/.kube
+[root@master ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@master ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+
+> 下面的操作只需要在 node (节点) 节点上执行即可
+
+```
+kubeadm join 192.168.61.100:6443 --token m17h7c.wgts4vfjyibx52fu \
+    --discovery-token-ca-cert-hash sha256:6aad006aacda0e4f81ff9aaa87585ab0d544f76a761dfbb3d1af4d65fb619689 
+```
+
+> 注意，这个是复制创建集群后显示的提示信息的
+
+在master上查看节点信息
+
+```c
+[root@master ~]# kubectl get nodes
+NAME    STATUS   ROLES     AGE   VERSION
+master  NotReady  master   6m    v1.17.4
+node1   NotReady   <none>  22s   v1.17.4
+node2   NotReady   <none>  19s   v1.17.4
+```
 
 ### 2.2.8 安装网络插件
+
+kubernetes支持多种网络插件，比如flannel、calico、canal等等，任选一种使用即可，本次选择flannel
+
+> 下面的操作依旧只在`master`节点执行即可，插件使用的是DaemonSet的控制器，它会在每个节点上都运行
+
+```c
+# 获取flannel的配置文件
+[root@master ~]# wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+# 修改文件中quay.io仓库为quay-mirror.qiniu.com
+
+# 使用配置文件启动flannel
+    [root@master ~] kubectl apply -f kube-flannel.yaml
+    
+# 稍等片刻，再次查看集群节点的状态
+[root@master ~]# kubectl get nodes
+NAME     STATUS   ROLES    AGE   VERSION
+master   Ready    master   26m   v1.17.4
+node1    Ready    <none>   23m   v1.17.4
+node2    Ready    <none>   23m   v1.17.4
+```
+
+## 2.3 服务部署
+
+接下来在kubernetes集群中部署一个nginx程序，测试下集群是否在正常工作
+
+```c
+# 部署nginx
+[root @master ~]# kubectl create deployment nginx --image=nginx:1.14-alpine
+
+# 暴露端口
+[root @master ~]# kubectl expose deploy nginx  --port=80 --type=NodePort
+    
+# 查看服务状态
+[root@master ~]# kubectl get pod,svc
+NAME                         READY   STATUS    RESTARTS   AGE
+pod/nginx-6867cdf567-5pmb9   1/1     Running   0          42s
+
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+service/kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP        27m
+service/nginx        NodePort    10.102.64.174   <none>        80:31821/TCP   11s  
+```
+
+> 接下来可以用浏览器访问`192.168.61.100:31821`，可以看到nginx的页面
 
 # 3 资源管理
 
@@ -316,6 +606,36 @@ address:
 # 形式二(了解):
 address: [顺义,昌平]
 ```
+
+> 数组语法`-`的理解：`-`后面可以是一个值，那就代表数组中的一个普通元素，当然也可以是一个新的`yaml`“对象”，比如下面这种：
+>
+> ```yaml
+> containers:
+>   - image: nginx:latest
+>     name: pod
+>     ports:
+>     - name: nginx-port
+>       containerPort: 80
+>       protocol: TCP
+> ```
+>
+> 转换成json是：
+>
+> ```json
+> "containers": [
+>       {
+>         "image": "nginx:latest",
+>         "name": "pod",
+>         "ports": [
+>           {
+>             "name": "nginx-port",
+>             "containerPort": 80,
+>             "protocol": "TCP"
+>           }
+>         ]
+>       }
+>     ]
+> ```
 
 > 小提示：
 >
@@ -685,7 +1005,685 @@ scp  -r  HOME/.kube   node1: HOME/
 
 # 4 实战入门
 
+本章节将介绍如何在kubernetes集群中部署一个nginx服务，并且能够对其进行访问。
 
+## 4.1 Namespace
+
+Namespace是kubernetes系统中的一种非常重要资源，它的主要作用是用来实现**多套环境的资源隔离**或者**多租户的资源隔离**。
+
+默认情况下，kubernetes集群中的所有的Pod都是可以相互访问的。但是在实际中，可能不想让两个Pod之间进行互相的访问，那此时就可以将两个Pod划分到不同的namespace下。kubernetes通过将集群内部的资源分配到不同的Namespace中，可以形成逻辑上的"组"，以方便不同的组的资源进行隔离使用和管理。
+
+可以通过kubernetes的**授权机制**，将不同的namespace交给不同租户进行管理，这样就实现了多租户的资源隔离。此时还能结合kubernetes的**资源配额机制**，限定不同租户能占用的资源，例如CPU使用量、内存使用量等等，来实现租户可用资源的管理。
+
+![image-20200407100850484](Kubernetes.assets/image-20200407100850484.png)
+
+> namespace可以理解为一种**边界**，通过这样的边界实现资源的隔离
+
+kubernetes在集群启动之后，会默认创建几个namespace
+
+```
+[root@master ~]# kubectl  get namespace
+NAME              STATUS   AGE
+default           Active   45h  # 所有未指定Namespace的对象都会被分配在default命名空间
+kube-node-lease   Active   45h  # 集群节点之间的心跳维护，v1.13开始引入
+kube-public       Active   45h  # 此命名空间下的资源可以被所有人访问（包括未认证用户）
+kube-system       Active   45h  # 所有由Kubernetes系统创建的资源都处于这个命名空间
+```
+
+>kubernetes集群相关组件正是位于kube-system命名空间中
+
+下面来看namespace资源的具体操作：
+
+### 4.1.1 查看
+
+1. 查看所有的ns  命令：`kubectl get ns`
+2. 查看指定的ns   命令：`kubectl get ns ns名称`
+3. 指定输出格式  命令：`kubectl get ns ns名称  -o 格式参数`
+4. 查看ns详情  命令：`kubectl describe ns ns名称`
+
+```c
+# 1 查看所有的ns  命令：kubectl get ns
+[root@master ~]# kubectl get ns
+NAME              STATUS   AGE
+default           Active   45h
+kube-node-lease   Active   45h
+kube-public       Active   45h     
+kube-system       Active   45h     
+
+# 2 查看指定的ns   命令：kubectl get ns ns名称
+[root@master ~]# kubectl get ns default
+NAME      STATUS   AGE
+default   Active   45h
+
+# 3 指定输出格式  命令：kubectl get ns ns名称  -o 格式参数
+# kubernetes支持的格式有很多，比较常见的是wide、json、yaml
+[root@master ~]# kubectl get ns default -o yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: "2021-05-08T04:44:16Z"
+  name: default
+  resourceVersion: "151"
+  selfLink: /api/v1/namespaces/default
+  uid: 7405f73a-e486-43d4-9db6-145f1409f090
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
+  
+# 4 查看ns详情  命令：kubectl describe ns ns名称
+[root@master ~]# kubectl describe ns default
+Name:         default
+Labels:       <none>
+Annotations:  <none>
+Status:       Active  # Active 命名空间正在使用中  Terminating 正在删除命名空间
+
+# ResourceQuota 针对namespace做的资源限制
+# LimitRange针对namespace中的每个组件做的资源限制
+No resource quota.
+No LimitRange resource.
+```
+
+### 4.1.2 创建
+
+```c
+# 创建namespace
+[root@master ~]# kubectl create ns dev
+namespace/dev created
+```
+
+### 4.1.3 删除
+
+```c
+# 删除namespace
+[root@master ~]# kubectl delete ns dev
+namespace "dev" deleted
+```
+
+### 4.1.4 配置方式
+
+首先准备一个yaml文件：ns-dev.yaml
+
+```c
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+```
+
+> 除了`metadata.name`要自己配置以外，其他的基本不用自己改
+
+然后就可以执行对应的创建和删除命令了：
+
+创建：kubectl create -f ns-dev.yaml
+
+删除：kubectl delete -f ns-dev.yaml
+
+## 4.2 Pod
+
+***Pod***是**kubernetes集群进行管理的<u>最小单元</u>**，**程序**要运行必须部署在**容器**中，而**容器**必须存在于**Pod**中。
+
+Pod可以认为是**容器的封装**，一个Pod中可以存在一个或者多个容器。
+
+![image-20200407121501907](Kubernetes.assets/image-20200407121501907.png)
+
+> 容器大概分为两类，最下面的属于**根容器**，上面的两个属于**用户容器**
+
+kubernetes在集群启动之后，集群中的各个**组件**也都是以**Pod**方式运行的。可以通过下面命令查看：
+
+```c
+[root@master ~]# kubectl get pod -n kube-system
+NAMESPACE     NAME                             READY   STATUS    RESTARTS   AGE
+kube-system   coredns-6955765f44-68g6v         1/1     Running   0          2d1h
+kube-system   coredns-6955765f44-cs5r8         1/1     Running   0          2d1h
+kube-system   etcd-master                      1/1     Running   0          2d1h
+kube-system   kube-apiserver-master            1/1     Running   0          2d1h
+kube-system   kube-controller-manager-master   1/1     Running   0          2d1h
+kube-system   kube-flannel-ds-amd64-47r25      1/1     Running   0          2d1h
+kube-system   kube-flannel-ds-amd64-ls5lh      1/1     Running   0          2d1h
+kube-system   kube-proxy-685tk                 1/1     Running   0          2d1h
+kube-system   kube-proxy-87spt                 1/1     Running   0          2d1h
+kube-system   kube-scheduler-master            1/1     Running   0          2d1h
+```
+
+> master节点上的四个组件：
+>
+> - kube-apiserver-master 
+> - kube-scheduler-master
+> - kube-controller-manager-master
+> - etcd-master
+>
+> dns相关：
+>
+> - coredns
+>
+> 网络与代理（每个节点上都有一个）
+>
+> - kube-flannel
+> - kube-proxy
+
+### 4.2.1 创建并运行
+
+kubernetes没有提供单独运行Pod的命令，都是通过**Pod控制器**来实现的
+
+```c
+# 命令格式： kubectl run (pod控制器名称) [参数] 
+# --image  指定Pod的镜像
+# --port   指定端口
+# --namespace  指定namespace
+[root@master ~]# kubectl run nginx --image=nginx:latest --port=80 --namespace dev 
+deployment.apps/nginx created
+```
+
+### 4.2.2 查看pod信息
+
+```c
+# 查看Pod基本信息
+[root@master ~]# kubectl get pods -n dev
+NAME    READY   STATUS    RESTARTS   AGE
+nginx   1/1     Running   0          43s
+
+# 查看Pod的详细信息
+[root@master ~]# kubectl describe pod nginx_name -n dev
+Name:         nginx
+Namespace:    dev
+Priority:     0
+Node:         node1/192.168.5.4
+Start Time:   Wed, 08 May 2021 09:29:24 +0800
+Labels:       pod-template-hash=5ff7956ff6
+              run=nginx
+Annotations:  <none>
+Status:       Running
+IP:           10.244.1.23
+IPs:
+  IP:           10.244.1.23
+Controlled By:  ReplicaSet/nginx
+Containers:
+  nginx:
+    Container ID:   docker://4c62b8c0648d2512380f4ffa5da2c99d16e05634979973449c98e9b829f6253c
+    Image:          nginx:latest
+    Image ID:       docker-pullable://nginx@sha256:485b610fefec7ff6c463ced9623314a04ed67e3945b9c08d7e53a47f6d108dc7
+    Port:           80/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Wed, 08 May 2021 09:30:01 +0800
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-hwvvw (ro)
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             True
+  ContainersReady   True
+  PodScheduled      True
+Volumes:
+  default-token-hwvvw:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  default-token-hwvvw
+    Optional:    false
+QoS Class:       BestEffort
+Node-Selectors:  <none>
+Tolerations:     node.kubernetes.io/not-ready:NoExecute for 300s
+                 node.kubernetes.io/unreachable:NoExecute for 300s
+Events:
+  Type    Reason     Age        From               Message
+  ----    ------     ----       ----               -------
+  Normal  Scheduled  <unknown>  default-scheduler  Successfully assigned dev/nginx-5ff7956ff6-fg2db to node1
+  Normal  Pulling    4m11s      kubelet, node1     Pulling image "nginx:latest"
+  Normal  Pulled     3m36s      kubelet, node1     Successfully pulled image "nginx:latest"
+  Normal  Created    3m36s      kubelet, node1     Created container nginx
+  Normal  Started    3m36s      kubelet, node1     Started container nginx
+```
+
+> `Events`这部分较为常用，可用来**排错**
+
+### 4.2.3 访问Pod
+
+要访问需要先得到其IP地址，这个IP地址会随着pod的更新而变化，是不稳定的
+
+```c
+# 查看pod更多信息/获取podIP
+[root@master ~]# kubectl get pods -n dev -o wide
+NAME        READY   STATUS    RESTARTS   AGE    IP             NODE    ... 
+nginx_name   1/1     Running   0          190s   10.244.1.23   node1   ...
+
+#访问POD
+[root@master ~]# curl http://10.244.1.23:80
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Welcome to nginx!</title>
+</head>
+<body>
+	<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+```
+
+> READY：pod中有几个容器，有几个正在运行
+>
+> > 根容器不会计算在内
+>
+> RESTARTS：重启次数
+>
+> > 遇见问题时会自动重启
+>
+> NODE：被调度到哪个节点上运行
+
+### 4.2.4 删除指定Pod
+
+```c
+# 删除指定Pod
+[root@master ~]# kubectl delete pod nginx_name -n dev
+pod "nginx" deleted
+
+# 此时，显示删除Pod成功，但是再查询，发现又新产生了一个 
+[root@master ~]# kubectl get pods -n dev
+NAME    READY   STATUS    RESTARTS   AGE
+nginx   1/1     Running   0          21s
+
+# 这是因为当前Pod是由Pod控制器创建的(kubectl run)，控制器会监控Pod状况，一旦发现Pod死亡，会立即重建
+# 此时要想删除Pod，必须删除Pod控制器
+
+# 先来查询一下当前namespace下的Pod控制器
+[root@master ~]# kubectl get deployment -n  dev
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   1/1     1            1           9m7s
+
+# 接下来，删除此PodPod控制器
+[root@master ~]# kubectl delete deployment nginx -n dev
+deployment.apps "nginx" deleted
+
+# 稍等片刻，再查询Pod，发现Pod被删除了
+[root@master ~]# kubectl get pods -n dev
+No resources found in dev namespace.
+```
+
+### 4.2.5 配置操作
+
+创建一个pod-nginx.yaml，内容如下：
+
+> 这里启动的就是一个单独的pod，而不是pod控制器，所以下面这个`name: nginx`其实是pod的名称
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: dev
+spec:
+  containers:
+  - image: nginx:latest
+    name: pod
+    ports:
+    - name: nginx-port
+      containerPort: 80
+      protocol: TCP
+```
+
+然后就可以执行对应的**创建**和**删除**命令了：
+
+创建：kubectl create -f pod-nginx.yaml
+
+删除：kubectl delete -f pod-nginx.yaml
+
+## 4.3 Label
+
+***Label***是kubernetes系统中的一个重要概念。它的作用就是在资源上添加**标识**，用来对它们进行区分和选择。
+
+> 比如有两组网站程序，一组负责前台，另一组负责后台；
+>
+> 看起来namespace也可以实现分组功能，但不同的namespace之间无法直接**通信**
+
+Label的特点：
+
+- 一个Label会以key/value**键值对**的形式附加到各种对象上，如Node、Pod、Service等等
+
+  > 意思就是Label是一对值，其实“键值”的概念没那么强
+
+- 一个资源对象可以定义**任意数量**的Label ，同一个Label也可以被添加到任意数量的资源对象上去
+
+- Label通常在**资源对象定义时**确定，当然也可以在**对象创建后**动态添加或者删除
+
+可以通过Label实现资源的**多维度分组**，以便灵活、方便地进行资源分配、调度、配置、部署等管理工作。
+
+> 一些常用的Label 示例如下：
+>
+> - 版本标签："version":"release", "version":"stable"......
+> - 环境标签："environment":"dev"，"environment":"test"，"environment":"pro"
+> - 架构标签："tier":"frontend"，"tier":"backend"
+
+标签定义完毕之后，还要考虑到**<u>标签的选择</u>**，这就要使用到`Label Selector`，即：
+
+- Label用于给某个资源对象**定义标识**
+
+- Label Selector用于**查询和筛选**拥有某些标签的资源对象
+
+当前有两种Label Selector：
+
+- 基于等式的Label Selector
+
+  `name = slave`: 选择所有包含Label中key="name"且value="slave"的对象
+
+  `env != production`: 选择所有包括Label中的key="env"且value不等于"production"的对象
+
+- 基于集合的Label Selector
+
+  `name in (master, slave)`: 选择所有包含Label中的key="name"且value="master"或"slave"的对象
+
+  `name not in (frontend)`: 选择所有包含Label中的key="name"且value不等于"frontend"的对象
+
+**标签的选择条件**可以使用**多个**，此时将多个Label Selector进行组合，使用逗号"`,`"进行分隔即可。例如：
+
+name=slave，env!=production
+
+name not in (frontend)，env!=production
+
+### 4.3.1 命令方式
+
+```c
+# 查看标签（省略了[name]，应该是查看命名空间下所有pod）
+[root@master ~]# kubectl get pod -n dev --show-labels
+NAME    READY   STATUS    RESTARTS   AGE   LABELS
+nginx   1/1     Running   0          23s   <none>
+
+# 为pod资源打标签
+[root@master ~]# kubectl label pod nginx version=1.0 -n dev
+pod/nginx-pod labeled
+
+# 为pod资源更新标签
+[root@master ~]# kubectl label pod nginx version=2.0 -n dev --overwrite
+pod/nginx-pod labeled
+
+# 查看标签
+[root@master ~]# kubectl get pod nginx -n dev --show-labels
+NAME        READY   STATUS    RESTARTS   AGE   LABELS
+nginx-pod   1/1     Running   0          10m   version=2.0
+
+# 筛选标签
+[root@master ~]# kubectl get pod -n dev -l version=2.0  --show-labels
+NAME        READY   STATUS    RESTARTS   AGE   LABELS
+nginx-pod   1/1     Running   0          17m   version=2.0
+[root@master ~]# kubectl get pod -n dev -l version!=2.0 --show-labels
+No resources found in dev namespace.
+
+#删除标签
+[root@master ~]# kubectl label pod nginx version- -n dev
+pod/nginx-pod labeled
+```
+
+> 注意：
+>
+> - 查看标签是通过`get pod`的额外参数`--show-labels`完成的，筛选也是，额外参数为`-l labelselector`
+> - 打标签、更新标签和删除标签的命令必须有`[name]`参数
+> - 一个pod只能创建`key`互不相同的一个或多个标签，但允许更新标签值，指定额外参数`--overwrite`即可
+
+### 4.3.2 配置方式
+
+在`metadata`中指定`labels`属性即可
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: dev
+  labels:
+    version: "3.0" 
+    env: "test"
+spec:
+  containers:
+  - image: nginx:latest
+    name: pod
+    ports:
+    - name: nginx-port
+      containerPort: 80
+      protocol: TCP
+```
+
+然后就可以执行对应的更新命令了：`kubectl apply -f pod-nginx.yaml`
+
+## 4.4 Deployment
+
+在kubernetes中，**Pod是最小的控制单元**，但是kubernetes很少直接控制Pod，一般都是通过**Pod控制器来**完成的。Pod控制器用于pod的管理，**确保pod资源符合预期的状态**，当pod的资源出现故障时，会尝试进行**重启或重建pod**。
+
+> 什么是“确保pod资源符合预期的状态”，比如最开始的时候让pod控制器创建了三个资源，中途有一个资源因为某种原因崩溃了，那pod控制器就必须重启或再创建一个
+
+在kubernetes中Pod控制器的**种类**有很多，本章节只介绍**一种**：***Deployment***。
+
+![image-20200408193950807](Kubernetes.assets/image-20200408193950807.png)
+
+> pod控制器与pod之间是依靠Label建立联系的
+
+### 4.4.1 命令操作
+
+```c
+# 命令格式: kubectl create deployment 名称  [参数] 
+# --image  指定pod的镜像
+# --port   指定端口
+# --replicas  指定创建pod数量
+# --namespace  指定namespace
+[root@master ~]# kubectl run nginx --image=nginx:latest --port=80 --replicas=3 -n dev
+deployment.apps/nginx created
+
+# 查看创建的Pod
+[root@master ~]# kubectl get pods -n dev
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-5ff7956ff6-6k8cb   1/1     Running   0          19s
+nginx-5ff7956ff6-jxfjt   1/1     Running   0          19s
+nginx-5ff7956ff6-v6jqw   1/1     Running   0          19s
+
+# 查看deployment的信息
+[root@master ~]# kubectl get deploy -n dev
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   3/3     3            3           2m42s
+
+# UP-TO-DATE：成功升级的副本数量
+# AVAILABLE：可用副本的数量
+[root@master ~]# kubectl get deploy -n dev -o wide
+NAME    READY UP-TO-DATE  AVAILABLE   AGE     CONTAINERS   IMAGES              SELECTOR
+nginx   3/3     3         3           2m51s   nginx        nginx:latest        run=nginx
+
+# 查看deployment的详细信息
+[root@master ~]# kubectl describe deploy nginx -n dev
+Name:                   nginx
+Namespace:              dev
+CreationTimestamp:      Wed, 08 May 2021 11:14:14 +0800
+Labels:                 run=nginx
+Annotations:            deployment.kubernetes.io/revision: 1
+Selector:               run=nginx
+Replicas:               3 desired | 3 updated | 3 total | 3 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max 违规词汇
+Pod Template:
+  Labels:  run=nginx
+  Containers:
+   nginx:
+    Image:        nginx:latest
+    Port:         80/TCP
+    Host Port:    0/TCP
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   nginx-5ff7956ff6 (3/3 replicas created)
+Events:
+  Type    Reason             Age    From                   Message
+  ----    ------             ----   ----                   -------
+  Normal  ScalingReplicaSet  5m43s  deployment-controller  Scaled up replicaset nginx-5ff7956ff6 to 3
+  
+# 删除 
+[root@master ~]# kubectl delete deploy nginx -n dev
+deployment.apps "nginx" deleted
+```
+
+> 注：
+>
+> - 新版本的k8s需要用`kubectl create deployment xxx`创建deployment
+>
+> - pod控制器与pod之间是依靠Label建立联系的
+>
+>   ```c
+>   [root@master ~]# kubectl get pod -n dev --show-labels
+>   NAME                     READY   STATUS    RESTARTS   AGE    LABELS
+>   nginx-64777cd554-62x2h   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   nginx-64777cd554-dptvv   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   nginx-64777cd554-x45qw   1/1     Running   0          4m2s   pod-template-hash=64777cd554,run=nginx
+>   ```
+>
+> - 删除pod控制器之后，pod也会被销毁
+
+### 4.4.2 配置操作
+
+创建一个deploy-nginx.yaml，内容如下：
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: dev
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      run: nginx
+  template:
+    metadata:
+      labels:
+        run: nginx
+    spec:
+      containers:
+      - image: nginx:latest
+        name: nginx
+        ports:
+        - containerPort: 80
+          protocol: TCP
+```
+
+> 注意`template`那一部分，正好是pod的配置形式，这称为`pod模板`；
+>
+> pod控制器和pod通过`matchLabels`和`labels`建立联系
+
+然后就可以执行对应的创建和删除命令了：
+
+创建：`kubectl create -f deploy-nginx.yaml`
+
+删除：`kubectl delete -f deploy-nginx.yaml`
+
+## 4.5 Service
+
+通过上节课的学习，已经能够利用Deployment来创建一组Pod来提供具有高可用性的服务。
+
+虽然每个Pod都会分配一个**单独的Pod IP**，然而却存在如下两问题：
+
+- Pod IP 会随着 **Pod 的重建**产生变化
+- Pod IP 仅仅是**集群内可见的虚拟IP**，**外部无法访问**
+
+这样对于访问这个服务带来了难度。因此，kubernetes设计了***Service***来解决这个问题。
+
+***Service***可以看作是一组同类Pod**对外的访问接口**。借助Service，应用可以方便地实现**<u>服务发现和负载均衡</u>**。
+
+![image-20200408194716912](Kubernetes.assets/image-20200408194716912.png)
+
+### 4.5.1 创建集群内部可访问的Service
+
+```c
+# 暴露Service
+[root@master ~]# kubectl expose deploy nginx --name=svc-nginx1 --type=ClusterIP --port=80 --target-port=80 -n dev
+service/svc-nginx1 exposed
+
+# 查看service
+[root@master ~]# kubectl get svc svc-nginx1 -n dev -o wide
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE     SELECTOR
+svc-nginx1   ClusterIP   10.109.179.231   <none>        80/TCP    3m51s   run=nginx
+
+# 这里产生了一个CLUSTER-IP，这就是service的IP，在Service的生命周期中，这个地址是不会变动的
+# 可以通过这个IP访问当前service对应的POD
+[root@master ~]# curl 10.109.179.231:80
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+.......
+</body>
+</html>
+```
+
+> 注意：
+>
+> - 暴露pod时需要通过deployment，而不是直接指定pod
+> - `ClusterIP`依然是集群内部的IP，外部无法访问
+
+### 4.5.2 创建集群外部也可访问的Service
+
+```c
+# 上面创建的Service的type类型为ClusterIP，这个ip地址只用集群内部可访问
+# 如果需要创建外部也可以访问的Service，需要修改type为NodePort
+[root@master ~]# kubectl expose deploy nginx --name=svc-nginx2 --type=NodePort --port=80 --target-port=80 -n dev
+service/svc-nginx2 exposed
+
+# 此时查看，会发现出现了NodePort类型的Service，而且有一对Port（80:31928/TC）
+[root@master ~]# kubectl get svc  svc-nginx2  -n dev -o wide
+NAME          TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE    SELECTOR
+svc-nginx2    NodePort    10.100.94.0      <none>        80:31928/TCP   9s     run=nginx
+
+# 接下来就可以通过集群外的主机访问 节点IP:31928访问服务了
+# 例如在的电脑主机上通过浏览器访问下面的地址
+http://192.168.61.100:31928/
+```
+
+### 4.5.3 删除Service
+
+```c
+[root@master ~]# kubectl delete svc svc-nginx-1 -n dev 
+service "svc-nginx-1" deleted
+```
+
+### 4.5.4 配置方式
+
+创建一个svc-nginx.yaml，内容如下：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nginx
+  namespace: dev
+spec:
+  clusterIP: 10.109.179.231 #固定svc的内网ip
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    run: nginx
+  type: ClusterIP
+```
+
+> 如果`spec.clusterIP`指定了，就用指定的ip，不然就随机分配
+
+然后就可以执行对应的创建和删除命令了：
+
+创建：kubectl create -f svc-nginx.yaml
+
+删除：kubectl delete -f svc-nginx.yaml
+
+> **小结**
+>
+> 至此，已经掌握了Namespace、Pod、Deployment、Service资源的基本操作，有了这些操作，就可以在kubernetes集群中实现一个服务的简单部署和访问了，但是如果想要更好的使用kubernetes，就需要深入学习这几种资源的细节和原理。
 
 # 5 Pod详解
 
