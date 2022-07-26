@@ -357,10 +357,10 @@ docker run ... -v 宿主机目录(或文件):容器内目录(文件) ...
 
 案例：实现步骤
 
-- 搜索mysql镜像
-- 拉取mysql镜像
-- 创建容器
-- 操作容器中的mysql
+1. 搜索mysql镜像
+2. 拉取mysql镜像
+3. 创建容器
+4. 操作容器中的mysql
 
 问题：外部机器怎么访问容器中的MySQL服务？
 
@@ -441,11 +441,11 @@ docker run ... -v 宿主机目录(或文件):容器内目录(文件) ...
 
 案例：实现步骤
 
-- 搜索tomcat镜像
-- 拉取tomcat镜像
-- 创建容器
-- 部署项目
-- 测试访问
+1. 搜索tomcat镜像
+2. 拉取tomcat镜像
+3. 创建容器
+4. 部署项目
+5. 测试访问
 
 具体操作步骤：
 
@@ -488,10 +488,10 @@ docker run ... -v 宿主机目录(或文件):容器内目录(文件) ...
 
 案例：实现步骤
 
-- 搜索Nginx镜像
-- 拉取Nginx镜像
-- 创建容器
-- 测试访问
+1. 搜索Nginx镜像
+2. 拉取Nginx镜像
+3. 创建容器
+4. 测试访问
 
 具体操作步骤：
 
@@ -567,17 +567,62 @@ docker run ... -v 宿主机目录(或文件):容器内目录(文件) ...
 
 4. 在html目录中创建`index.html`文件，就可以使用外部机访问nginx了（默认端口就是80）
 
-
-
 ## 4.4 Redis部署
 
+案例：需求
 
+- 在Docker容器中部署Redis，并通过外部机器访问Redis
 
+案例：实现步骤
 
+1. 搜索Redis镜像
+2. 拉取Redis镜像
+3. 创建容器
+4. 测试访问
+
+具体操作步骤：
+
+1. 搜索Redis镜像
+
+   ```sh
+   docker search redis
+   ```
+
+2. 拉取Redis镜像
+
+   ```sh
+   docker pull redis:5.0
+   ```
+
+3. 创建容器，设置端口映射
+
+   ```sh
+   docker run -id --name=c_redis -p 6379:6379 redis:5.0
+   ```
+
+4. 使用外部机器连接redis
+
+   ```sh
+   redis-cli.exe -h hadoop200 -p 6379
+   ```
+
+   > 可以直接用windows的redis客户端
 
 # 5 Dockerfile
 
+## 5.1 Docker镜像原理
 
+
+
+## 5.2 Dockerfile概念及作用
+
+
+
+## 5.3 Dockerfile关键字
+
+
+
+## 5.4 案例
 
 
 
