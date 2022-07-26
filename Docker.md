@@ -188,7 +188,42 @@ docker run 参数 版本:版本号 <进入容器的初始化指令>
   - centOS镜像默认为`/bin/bash`
   - 如果不是创建后自动进入容器，可以不指定该指令
 
-  
+
+进入容器
+
+```sh
+docker exec 参数 #退出容器，容器不会关闭
+```
+
+停止容器
+
+```sh
+docker stop 容器名称
+```
+
+启动容器
+
+```sh
+docker start 容器名称
+```
+
+删除容器：如果容器是**运行状态**则删除失败，需要停止容器参能删除
+
+```sh
+docker rm 容器名称
+```
+
+> 删除所有容器：
+>
+> ```sh
+> docker rm `docker ps -ap`
+> ```
+
+查看容器信息
+
+```sh
+docker inspect 容器名称
+```
 
 
 
