@@ -148,6 +148,12 @@ docker rmi `docker images -q` #删除所有本地镜像
 >
 > 删除所有本地镜像的命令，其实是将``里面命令的**执行结果当成参数**
 
+查看镜像详细信息
+
+```sh
+docker inspect 镜像名:版本号
+```
+
 ## 2.3 Docker容器相关命令
 
 查看容器
@@ -221,7 +227,7 @@ docker rm 容器名称
 > docker rm `docker ps -ap`
 > ```
 
-查看容器信息
+查看容器详细信息
 
 ```sh
 docker inspect 容器名称
@@ -612,19 +618,197 @@ docker run ... -v 宿主机目录(或文件):容器内目录(文件) ...
 
 ## 5.1 Docker镜像原理
 
+思考：
 
+- Docker镜像本质是什么？
+  - 一个文件，但不是普通的文件
+- Docker中一个centos镜像为什么只有200MB，而一个centos操作系统的iso文件要几个G？
+- Docker中一个tomcat镜像为什么有500MB，而一个tomcat安装包只有70多MB？
+
+<img src="Docker.assets/image-20220726145413073.png" alt="image-20220726145413073" style="zoom:67%;" />
+
+### 5.1.1 镜像与操作系统
+
+> 镜像和操作系统息息相关，通过镜像文件也可以安装并启动一个“操作系统”
+
+操作系统组成部分：
+
+- 进程调度子系统
+- 进程通信子系统
+- 内存管理子系统
+- 设备管理子系统
+- **文件管理子系统**
+- 网络通信子系统
+- 作业控制子系统
+
+Linux文件系统由bootfs和rootfs两部分组成
+
+> fs：file system
+>
+> <img src="Docker.assets/image-20220726150140948.png" alt="image-20220726150140948" style="zoom:67%;" />
+
+- bootfs：包含bootloader（引导加载程序）和kernel（内核）
+
+- rootfs：root文件系统，包含的就是典型Linux系统中的/dev，/proc，/bin，/etc等标准目录和文件
+
+  > rootfs是要基于bootfs开发的
+
+- 不同的linux发行版，bootfs基本一样，而rootfs不同，如ubuntu、centos等
+
+### 5.1.2 镜像与文件系统
+
+- Docker镜像是由特殊的**文件系统叠加**而成
+
+  > 一个重要的好处就是：**复用**
+
+- 最底端是bootfs，并使用宿主机的bootfs
+
+  > 也就是说docker和宿主机用一个内核，做到了**复用**，不用再加载一遍，所以**启动非常快**
+  >
+  > > 进一步说，在Linux的系统上就不能安装windows的docker
+
+- 第二层是root文件系统rootfs，称为***base image***，也是一种镜像
+
+- 然后再往上可以**叠加**其他的镜像文件
+
+  > 有的镜像需要依赖其他镜像，比如tomcat镜像，需要jdk镜像，也需要rootfs基础镜像，但对外暴露的是一个tomcat镜像
+  >
+  > > 下载tomcat镜像的时候，就要看有没有jdk镜像，没有就要下载，再接着看rootfs，没有也要下载，一层一层叠加。当然，对外统一暴露的还是一个tomcat镜像整体。
+  > >
+  > > 下载的时候也能看到，是好几层同时在下
+  >
+  > <img src="Docker.assets/image-20220726151156720.png" alt="image-20220726151156720" style="zoom:50%;" />
+  >
+  > > 注意这是**只读镜像**，下面也会进一步讲解
+  >
+  > 这也解释了为什么tomcat镜像大于一个单独的安装包；
+
+  > 这样做的好处是，在之后下载其他镜像时，其他镜像可以**复用**已经下载好的处于底层位置的镜像，不需要再下载一遍
+
+- **统一文件系统**（Union File System）技术能够将不同的层整合成一个文件系统，为这些层提供了一个统一的视角，这样就隐藏了多层的存在，在用户的角度看来，只存在一个文件系统
+
+- 一个镜像可以放在另一个镜像上面，位于下面的镜像称为**父镜像**，最底部的镜像称为**基础镜像**
+
+- 当从一个镜像启动容器时，Docker会在最顶层加载一个**读写文件系统**作为容器
+
+  > 之前不是只读镜像吗，不能改，因为改了没法更方便地复用了。
+  >
+  > <img src="Docker.assets/image-20220726151907438.png" alt="image-20220726151907438" style="zoom:67%;" />
+  >
+  > 如果非要改，那就要先用镜像**启动容器**，然后**在新的文件系统下修改**，修改后，再将容器弄成一个新的镜像
+  >
+  > <img src="Docker.assets/image-20220726151921975.png" alt="image-20220726151921975" style="zoom:67%;" />
+  >
+  > 这样做，想改的都改了，**新的镜像**有了，之前底层的镜像还能照常**复用**
+
+回答思考题：
+
+- Docker镜像本质是什么？
+
+  - **分层文件系统**
+
+- Docker中一个centos镜像为什么只有200MB，而一个centos操作系统的iso文件要几个G？
+
+  - centos的iso镜像文件包含bootfs和rootfs，而docker的centos镜像复用操作系统的bootfs，只有rootfs和其他镜像层
+
+- Docker中一个tomcat镜像为什么有500MB，而一个tomcat安装包只有70多MB？
+
+  - 由于docker中镜像是分层的，tomcat虽然只有70多MB，但它需要依赖于**父镜像和基础镜像**，所以整个对外暴露的tomcat镜像大小有500多MB
+
+    > 使用`docker inspect tomcat:latest`查看一下：
+    >
+    > <img src="Docker.assets/image-20220726152624486.png" alt="image-20220726152624486" style="zoom:67%;" />
+    >
+    > 有好多层
+
+## 5.2 镜像制作
+
+Docker镜像如何制作？
+
+- 容器转为镜像
+
+  ```sh
+  docker commit 容器id 镜像名称:版本号
+  ```
+
+  ```sh
+  docker save -o 压缩文件名称 镜像名称:版本号 # 将镜像打包成压缩包
+  ```
+
+  > 这样做的目的就是，**修改镜像配置并将其保存**。
+  >
+  > 比如可以直接在tomcat容器中部署一个程序，然后将容器整体打包成镜像，之后直接运行镜像文件，就不用再部署了
+
+  ```sh
+  docker load -i 压缩文件名称 # 将压缩包还原成镜像
+  ```
+
+  <img src="Docker.assets/image-20220726153132161.png" alt="image-20220726153132161" style="zoom:67%;" />
+
+  > 问题：通过commit提交镜像时，数据卷中的数据不生效怎么办？再挂载回去即可
 
 ## 5.2 Dockerfile概念及作用
+
+### 5.2.1 Dockerfile概念
+
+Dockerfile是一个文本文件
+
+包含了一条条的指令
+
+每一条指令构建一层，基于基础镜像，最终构建出一个新的镜像
+
+对于开发人员：可以为开发团队提供一个完全一致的开发环境
+
+对于测试人员：可以直接拿开发时所构建的镜像或者通过Dockerfile文件构建一个新的镜像开始工作了
+
+对于运维人员：在部署时，可实现应用的无缝移植
 
 
 
 ## 5.3 Dockerfile关键字
 
-
+<table><thead><tr><th>关键字</th><th>作用</th><th align="left">备注</th></tr></thead><tbody><tr><td>FROM</td><td>指定父镜像</td><td align="left">指定dockerfile基于哪个images构建</td></tr><tr><td>MAINTAINER</td><td>作者信息</td><td align="left">用来标明这个dockerfile 谁写的</td></tr><tr><td>LABEL</td><td>标签</td><td align="left">用来指明dockerfile 的标签，可以使用Label代替Maintainer 最终都是在docker image基本信息中可以查看</td></tr><tr><td>RUN</td><td>执行命令</td><td align="left">执行一段命令 默认是<code>/bin/sh</code> 格式：<code>RUN command</code> 或者 <code>RUN ["command","param1","param2"]</code></td></tr><tr><td>CMD</td><td>容器启动命令</td><td align="left">提供启动容器时候的默认命令和ENTRYPOINT配合使用。格式：<code>CMD command param1 param2</code>或者<code>CMD ["command","param1","param2"]</code></td></tr><tr><td>ENTRYPOINT</td><td>入口</td><td align="left">一般在制作一些执行就关闭的容器中会使用</td></tr><tr><td>COPY</td><td>复制文件</td><td align="left">build 的时候复制文件到image中</td></tr><tr><td>ADD</td><td>添加文件</td><td align="left">build 的时候添加文件到iamge 中，不仅仅局限于当前build 上下文 可以来源于远程服务</td></tr><tr><td>ENV</td><td>环境变量</td><td align="left">指定build 时候的环境变量 可以在启动容器的时候 通过<code>-e</code>覆盖 格式：<code>ENV name = value</code></td></tr><tr><td>ARG</td><td>构建参数</td><td align="left">构建参数 只在构建的时候使用参时 如果有ENV 那么ENV 的相同名字的值始终覆盖ARG 的值</td></tr><tr><td>VOLUME</td><td>定义外部可以挂载的数据卷</td><td align="left">指定build 的image 那些目录可以启动的时候挂载到文件系统中 启动容器的时候使用<code>-v</code>绑定 格式：<code>VOLUME ["目录"]</code></td></tr><tr><td>EXPOSE</td><td>暴露端口</td><td align="left">定义容器运行的时候监听的端口 启动容器的使用<code>-p</code>来绑定暴露端口 格式：<code>EXPOSE 8080</code>或者<code>EXPOSE 8080/udp</code></td></tr><tr><td>WORKDIR</td><td>工作目录</td><td align="left">指定容器内部的工作目录 如果没有创建则自动创建 如果指定/使用是绝对地址 如果不是/开头那么是在上一条workdir 的路径的相对路径</td></tr><tr><td>USER</td><td>指定执行用户</td><td align="left">指定build 或者启动的时候 用户 在RUN CMD ENTRYPOINT执行的时候的用户</td></tr><tr><td>HEALTHCHECK</td><td>健康检查</td><td align="left">指定监测当前容器的健康测试的命令 基本上没用 因为很多时候 应用本身由健康监测机制</td></tr><tr><td>ONBUILD</td><td>触发器</td><td align="left">当存在ONBUILD 关键字的镜像作为基础镜像的时候 当执行FROM 完成之后 会执行ONBUILD的命令 但是不影响当前镜像 用处也不怎么大</td></tr><tr><td>STOPSIGNAL</td><td>发送信息量到宿主机</td><td align="left">该STOPSIGNAL指令设置将发送到容器的系统调用信号以退出</td></tr><tr><td>SHELL</td><td>指定执行脚本的shell</td><td align="left">指定RUN CMD ENTRYPOINT 执行命令的时候 使用的shell</td></tr></tbody></table>
 
 ## 5.4 案例
 
+案例：需求
 
+- 定义dockerfile，发布springboot项目
+
+案例：实现步骤
+
+- 定义父镜像：`FROM java:8`
+
+- 定义作者信息：`MAINTANIER username<useremail>`
+
+- 将jar包添加到容器：`ADD springboot.jar app.jar`
+
+- 定义容器启动执行的命令：`CMD java -jar app.jar`
+
+  > 后面又写一个`app.jar`，是改名
+
+- 通过dockerfile构建镜像：`docker build -f dockerfile文件路径 -t 镜像名称:版本 .`
+
+```sh
+docker build -f image_manager.dockerfile -t image_manager .
+```
+
+```sh
+docker stop image_manager_container
+docker rm image_manager_container
+docker run -id -p 8089:8089 -v /home/ices/docker-files/rocksdb/defaultCF:/rocksdb/defaultCF -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker -v /home/ices/anaconda3/bin:/usr/local/sbin --name=image_manager_container image_manager
+
+```
+
+```sh
+docker exec -it image_manager_container /bin/bash
+```
+
+export PATH=anaconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+export PYTHONHOME=/anaconda3/bin
+
+export PYTHONPATH=/anaconda3/bin/python
 
 
 
