@@ -796,7 +796,7 @@ docker build -f image_manager.dockerfile -t image_manager .
 ```sh
 docker stop image_manager_container
 docker rm image_manager_container
-docker run -id -p 8089:8089 -v /home/ices/docker-files/rocksdb/defaultCF:/rocksdb/defaultCF -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker -v /home/ices/anaconda3/bin:/usr/local/sbin --name=image_manager_container image_manager
+docker run -id -p 8089:8089 -v /home/ices/docker-files/rocksdb/defaultCF:/rocksdb/defaultCF -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker --name=image_manager_container image_manager
 
 ```
 
@@ -804,11 +804,7 @@ docker run -id -p 8089:8089 -v /home/ices/docker-files/rocksdb/defaultCF:/rocksd
 docker exec -it image_manager_container /bin/bash
 ```
 
-export PATH=anaconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-export PYTHONHOME=/anaconda3/bin
-
-export PYTHONPATH=/anaconda3/bin/python
 
 
 
